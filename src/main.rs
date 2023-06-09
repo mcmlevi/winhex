@@ -1,4 +1,4 @@
-use std::{fs::{self}};
+use std::{fs::{self}, io::{stdin}, ops::Index};
 
 use clap::Parser;
 
@@ -13,12 +13,20 @@ struct Args {
     width: u16,
 
     /// The number of rows to display
-    #[arg(long, default_value_t = 16)]
+    #[arg(long, default_value_t = 16, conflicts_with = "no_limit")]
     height: u16,
+
+    /// Dump the entire file to disk
+    #[arg(long = "no-limit", default_value_t = false, conflicts_with  = "height")]
+    no_limit: bool,
 
     /// Output the text as UTF-8
     #[arg(long,default_value_t = false)]
-    utf8 : bool,
+    utf8: bool,
+
+    /// file offset specifier in bytes.
+    #[arg(long, default_value_t = 0)]
+    offset: usize,
 }
 
 fn format_header(width : u16) {
@@ -65,20 +73,42 @@ fn format_row(offset : u64, slice : &[u8], is_utf8 : bool) {
 fn main() {
     let args = Args::parse();
     
-    match fs::read(args.file) {
+    match fs::read(&args.file) {
         Ok(buffer) => {
+
+            if args.offset as usize >= buffer.len() {
+                print!("The file offset: {}, is to large, max size is: {}", args.offset, buffer.len());
+                return;
+            }
+
             format_header(args.width);
-            for (i, slice) in buffer.windows(args.width as usize).step_by(args.width as usize).enumerate() {
-                format_row(i as u64 * args.width as u64, slice, args.utf8);
+            for (i, slice) in buffer[args.offset as usize..].windows(args.width as usize).step_by(args.width as usize).enumerate() {
                 
-                //TODO this should prompt for more input possibly
-                if i >= args.height as usize {
-                    break;
+                let index_with_offset = (i * args.width as usize) + args.offset;
+
+                format_row(index_with_offset as u64, slice, args.utf8);
+                
+
+                if !args.no_limit {
+                    if i != 0 && (i % args.height as usize == 0) {
+                        println!("Show the next set of bytes [y/n]?");
+    
+                        let mut repeat : String = String::new();
+                        stdin().read_line(&mut repeat).unwrap();
+                        repeat = repeat.to_lowercase();
+    
+                        match repeat.chars().nth(0){
+                            Some('y') => {},
+                            _ => {
+                                break;
+                            } 
+                        }
+                    }
                 }
             }
         }
         Err(_) =>{
-            println!("File could not be read successfully");
+            println!("File \"{}\" could not be read successfully", args.file.display());
         }
     }
 }
