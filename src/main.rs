@@ -1,6 +1,8 @@
-use std::{fs::{self}, io::{stdin}, ops::Index};
+use std::fmt;
+use std::{fs::{self}, io::{stdin}};
 
 use clap::Parser;
+use clap_num::maybe_hex;
 
 /// winhex is a utility tool to visualize binary data 
 #[derive(Parser)]
@@ -25,8 +27,17 @@ struct Args {
     utf8: bool,
 
     /// file offset specifier in bytes.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, value_parser = maybe_hex::<usize>)]
     offset: usize,
+}
+
+#[derive(Debug)]
+struct ValidationError{error: String}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.error)
+    }
 }
 
 fn format_header(width : u16) {
@@ -70,40 +81,51 @@ fn format_row(offset : u64, slice : &[u8], is_utf8 : bool) {
     }
 }
 
+fn print_document(args: &Args, buffer: Vec<u8>) {
+    format_header(args.width);
+    for (i, slice) in buffer[args.offset as usize..].windows(args.width as usize).step_by(args.width as usize).enumerate() {
+    
+        let index_with_offset = (i * args.width as usize) + args.offset;
+
+        format_row(index_with_offset as u64, slice, args.utf8);
+    
+
+        if !args.no_limit {
+            if i != 0 && (i % args.height as usize == 0) {
+                println!("Show the next set of bytes [y/n]?");
+    
+                let mut repeat : String = String::new();
+                stdin().read_line(&mut repeat).unwrap();
+                repeat = repeat.to_lowercase();
+    
+                match repeat.trim() {
+                    "yes" | "y" => {}
+                    _ => break,
+                };
+            }
+        }
+    }
+}
+
+fn validate_input(args: &Args, buffer: &Vec<u8>) -> Result<(), ValidationError> {
+    if args.offset as usize >= buffer.len() {
+        return Err(ValidationError { error: format!("The file offset: {}, is to large, max size is: {}", args.offset, buffer.len()) });
+    }
+
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
     
     match fs::read(&args.file) {
         Ok(buffer) => {
-
-            if args.offset as usize >= buffer.len() {
-                print!("The file offset: {}, is to large, max size is: {}", args.offset, buffer.len());
-                return;
-            }
-
-            format_header(args.width);
-            for (i, slice) in buffer[args.offset as usize..].windows(args.width as usize).step_by(args.width as usize).enumerate() {
-                
-                let index_with_offset = (i * args.width as usize) + args.offset;
-
-                format_row(index_with_offset as u64, slice, args.utf8);
-                
-
-                if !args.no_limit {
-                    if i != 0 && (i % args.height as usize == 0) {
-                        println!("Show the next set of bytes [y/n]?");
-    
-                        let mut repeat : String = String::new();
-                        stdin().read_line(&mut repeat).unwrap();
-                        repeat = repeat.to_lowercase();
-    
-                        match repeat.chars().nth(0){
-                            Some('y') => {},
-                            _ => {
-                                break;
-                            } 
-                        }
-                    }
+            match validate_input(&args, &buffer) {
+                Ok(_) => {
+                    print_document(&args, buffer);
+                },
+                Err(e) => {
+                    println!("Error: {}", e);
                 }
             }
         }
